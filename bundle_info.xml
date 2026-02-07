@@ -1,0 +1,38 @@
+<BundleInfo name="ChimeraX-AMESViewer"
+    version="0.1" package="chimerax.amesviewer"
+    minSessionVersion="1" maxSessionVersion="1">
+
+  <Author>AMES Developer</Author>
+  <Email>your.email@example.com</Email>
+  <URL>https://github.com/yourusername/ChimeraX_AMESViewer</URL>
+
+  <Synopsis>Evolutionary trajectory viewer for AMES simulations</Synopsis>
+  <Description>
+    A tool for visualizing molecular evolution trajectories from AMES 
+    (Atomistic Molecular Evolution Simulator). Unlike traditional MD 
+    trajectories, AMES trajectories contain structures with varying 
+    numbers of atoms and residues. This tool sequentially aligns 
+    structures using ChimeraX's matchmaker and provides playback 
+    controls for visualization.
+  </Description>
+
+  <Categories>
+    <Category name="General"/>
+    <Category name="Structural Evolution"/>
+  </Categories>
+
+  <Dependencies>
+    <Dependency name="ChimeraX-Core" version="~=1.1"/>
+    <Dependency name="ChimeraX-UI" version="~=1.0"/>
+  </Dependencies>
+
+  <Classifiers>
+    <PythonClassifier>Development Status :: 3 - Alpha</PythonClassifier>
+    <PythonClassifier>License :: Freeware</PythonClassifier>
+    <ChimeraXClassifier>ChimeraX :: Tool :: AMES Viewer :: General ::
+      Visualize evolutionary trajectories from AMES simulations</ChimeraXClassifier>
+    <ChimeraXClassifier>ChimeraX :: Command :: ames :: General ::
+      Commands for AMES trajectory visualization</ChimeraXClassifier>
+  </Classifiers>
+
+</BundleInfo>
