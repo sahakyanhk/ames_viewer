@@ -31,8 +31,6 @@
     <PythonClassifier>License :: Freeware</PythonClassifier>
     <ChimeraXClassifier>ChimeraX :: Tool :: AMES Viewer :: General ::
       Visualize evolutionary trajectories from AMES simulations</ChimeraXClassifier>
-    <ChimeraXClassifier>ChimeraX :: Command :: ames :: General ::
-      Commands for AMES trajectory visualization</ChimeraXClassifier>
   </Classifiers>
 
 </BundleInfo>

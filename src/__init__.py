@@ -15,11 +15,6 @@ class _AMESViewerAPI(BundleAPI):
             return AMESViewerTool(session, ti.name)
         return None
 
-    @staticmethod
-    def register_command(bi, ci, logger):
-        """Register the 'ames' command."""
-        from . import cmd
-        cmd.register_ames_command(logger)
 
 
 bundle_api = _AMESViewerAPI()

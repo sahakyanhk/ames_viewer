@@ -8,9 +8,9 @@ from chimerax.core.tools import ToolInstance
 from chimerax.ui import MainToolWindow
 
 from Qt.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QWidget, QPushButton, 
+    QVBoxLayout, QHBoxLayout, QWidget, QPushButton,
     QSlider, QLabel, QSpinBox, QGroupBox,
-    QComboBox, QCheckBox, QFileDialog
+    QComboBox, QCheckBox, QFileDialog, QButtonGroup
 )
 from Qt.QtCore import Qt, QTimer
 
@@ -331,12 +331,25 @@ class AMESViewerTool(ToolInstance):
         movie_layout.setContentsMargins(6, 6, 6, 6)
         movie_group.setLayout(movie_layout)
 
-        # Fixed duration option
-        duration_layout = QHBoxLayout()
+        # Mutually exclusive recording mode checkboxes
+        self.movie_mode_group = QButtonGroup(self.tool_window.ui_area)
+        self.movie_mode_group.setExclusive(False)
+
+        self.record_traj_check = QCheckBox("Record trajectory")
+        self.record_traj_check.setChecked(True)
+        self.record_traj_check.setToolTip("Record trajectory frame-by-frame at playback fps")
+        self.movie_mode_group.addButton(self.record_traj_check)
+
+        self.record_all_check = QCheckBox("Record user actions")
+        self.record_all_check.setChecked(False)
+        self.record_all_check.setToolTip("Record user actions on screen until Stop is clicked")
+        self.movie_mode_group.addButton(self.record_all_check)
+
         self.fixed_duration_check = QCheckBox("Fixed duration:")
         self.fixed_duration_check.setChecked(False)
-        self.fixed_duration_check.stateChanged.connect(self._on_fixed_duration_changed)
-        duration_layout.addWidget(self.fixed_duration_check)
+        self.fixed_duration_check.setToolTip("Record trajectory fitted to a target duration")
+        self.movie_mode_group.addButton(self.fixed_duration_check)
+
         self.duration_spin = QSpinBox()
         self.duration_spin.setMinimum(1)
         self.duration_spin.setMaximum(300)
@@ -345,15 +358,47 @@ class AMESViewerTool(ToolInstance):
         self.duration_spin.setEnabled(False)
         self.duration_spin.setToolTip("Target movie duration in seconds")
         self.duration_spin.setMaximumWidth(60)
+
+        # Each row in its own HBoxLayout for consistent alignment
+        for check in (self.record_traj_check, self.record_all_check):
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.addWidget(check)
+            row.addStretch()
+            movie_layout.addLayout(row)
+
+        duration_layout = QHBoxLayout()
+        duration_layout.setContentsMargins(0, 0, 0, 0)
+        duration_layout.addWidget(self.fixed_duration_check)
         duration_layout.addWidget(self.duration_spin)
         duration_layout.addStretch()
         movie_layout.addLayout(duration_layout)
 
-        # Record all actions option
-        self.record_all_check = QCheckBox("Record all actions")
-        self.record_all_check.setChecked(False)
-        self.record_all_check.setToolTip("Record everything on screen until Stop is clicked")
-        movie_layout.addWidget(self.record_all_check)
+        self.movie_mode_group.buttonClicked.connect(self._on_movie_mode_changed)
+
+        # Resolution option
+        res_layout = QHBoxLayout()
+        res_layout.setContentsMargins(0, 0, 0, 0)
+        res_layout.addWidget(QLabel("Size:"))
+        self.res_width_spin = QSpinBox()
+        self.res_width_spin.setMinimum(0)
+        self.res_width_spin.setMaximum(7680)
+        self.res_width_spin.setValue(0)
+        self.res_width_spin.setSpecialValueText("auto")
+        self.res_width_spin.setToolTip("Frame width (0 = window resolution)")
+        self.res_width_spin.setMaximumWidth(65)
+        res_layout.addWidget(self.res_width_spin)
+        res_layout.addWidget(QLabel("x"))
+        self.res_height_spin = QSpinBox()
+        self.res_height_spin.setMinimum(0)
+        self.res_height_spin.setMaximum(4320)
+        self.res_height_spin.setValue(0)
+        self.res_height_spin.setSpecialValueText("auto")
+        self.res_height_spin.setToolTip("Frame height (0 = window resolution)")
+        self.res_height_spin.setMaximumWidth(65)
+        res_layout.addWidget(self.res_height_spin)
+        res_layout.addStretch()
+        movie_layout.addLayout(res_layout)
 
         # Record/Stop buttons
         movie_btns_layout = QHBoxLayout()
@@ -367,7 +412,7 @@ class AMESViewerTool(ToolInstance):
         movie_btns_layout.addWidget(self.stop_record_btn)
         movie_btns_layout.addStretch()
         movie_layout.addLayout(movie_btns_layout)
-        
+
         self.movie_status = QLabel("")
         movie_layout.addWidget(self.movie_status)
 
@@ -428,6 +473,45 @@ class AMESViewerTool(ToolInstance):
         else:
             self.load_status.setText(f"{n} files selected")
             self.run_load_btn.setEnabled(True)
+
+    def _validate_structures(self):
+        """Remove deleted models from structures list. Returns True if structures remain."""
+        before = len(self.structures)
+        self.structures = [m for m in self.structures if not m.deleted]
+        after = len(self.structures)
+
+        if before != after:
+            if after == 0:
+                self._reset_ui()
+                return False
+            # Update slider range for remaining structures
+            self.frame_slider.setMaximum(after - 1)
+            if self.current_frame >= after:
+                self.current_frame = after - 1
+
+        return after > 0
+
+    def _reset_ui(self):
+        """Reset UI to initial state (no structures loaded)."""
+        self._stop_playback()
+        self.frame_slider.setMaximum(0)
+        self.frame_slider.setValue(0)
+        self.frame_slider.setEnabled(False)
+        self.frame_label.setText("0 / 0")
+        self.align_btn.setEnabled(False)
+        self.play_btn.setEnabled(False)
+        self.first_btn.setEnabled(False)
+        self.prev_btn.setEnabled(False)
+        self.next_btn.setEnabled(False)
+        self.last_btn.setEnabled(False)
+        self.record_btn.setEnabled(False)
+        self.info_label.setText("")
+
+    def _model_spec(self):
+        """Return ChimeraX model specifier for all tool structures."""
+        if not self.structures:
+            return ""
+        return "#" + ",".join(m.id_string for m in self.structures)
 
     def _run_load(self):
         """Load the pending files."""
@@ -622,7 +706,7 @@ class AMESViewerTool(ToolInstance):
             if f.endswith(".cxc"):
                 try:
                     os.remove(os.path.join(self.tmp_dir, f))
-                except:
+                except Exception:
                     pass
 
         return aligned_files
@@ -671,7 +755,7 @@ class AMESViewerTool(ToolInstance):
 
     def _align_structures(self):
         """Sequentially align all structures using matchmaker."""
-        if len(self.structures) < 2:
+        if not self._validate_structures() or len(self.structures) < 2:
             return
         
         from chimerax.core.commands import run
@@ -712,7 +796,7 @@ class AMESViewerTool(ToolInstance):
 
     def _show_frame(self, frame_idx):
         """Show only the specified frame, hide all others."""
-        if not self.structures:
+        if not self._validate_structures():
             return
 
         frame_idx = max(0, min(frame_idx, len(self.structures) - 1))
@@ -759,7 +843,10 @@ class AMESViewerTool(ToolInstance):
         skip = self.skip_spin.value()
         new_frame = self.current_frame - skip
         if new_frame < 0:
-            new_frame = 0
+            if self.loop_check.isChecked():
+                new_frame = len(self.structures) - 1
+            else:
+                new_frame = 0
         self._show_frame(new_frame)
 
     def _go_next(self):
@@ -792,6 +879,9 @@ class AMESViewerTool(ToolInstance):
 
     def _advance_frame(self):
         """Advance to next frame (called by timer, respects skip setting)."""
+        if not self._validate_structures():
+            self._stop_playback()
+            return
         skip = self.skip_spin.value()
         new_frame = self.current_frame + skip
         if new_frame < len(self.structures):
@@ -809,8 +899,12 @@ class AMESViewerTool(ToolInstance):
         if self.is_playing:
             self.timer.setInterval(self.play_speed)
 
-    def _on_fixed_duration_changed(self, state):
-        """Handle fixed duration checkbox change."""
+    def _on_movie_mode_changed(self, clicked_btn):
+        """Ensure only one movie mode checkbox is selected at a time."""
+        if clicked_btn.isChecked():
+            for btn in self.movie_mode_group.buttons():
+                if btn is not clicked_btn:
+                    btn.setChecked(False)
         self.duration_spin.setEnabled(self.fixed_duration_check.isChecked())
 
     def _on_style_changed(self, state=None):
@@ -826,73 +920,76 @@ class AMESViewerTool(ToolInstance):
         self._apply_ligand_style()
 
     def _apply_styles(self):
-        """Apply display styles to all structures at once."""
-        if not self.structures:
+        """Apply display styles to tool structures only."""
+        if not self._validate_structures():
             return
 
         from chimerax.core.commands import run
+        spec = self._model_spec()
 
         try:
             # Chain A
-            run(self.session, "hide /A target ac", log=False)
+            run(self.session, f"hide {spec}/A target ac", log=False)
             if self.cartoon_check_A.isChecked():
-                run(self.session, "cartoon /A", log=False)
-                run(self.session, "show /A target c", log=False)
+                run(self.session, f"cartoon {spec}/A", log=False)
+                run(self.session, f"show {spec}/A target c", log=False)
             if self.stick_check_A.isChecked():
-                run(self.session, "show /A target a", log=False)
-                run(self.session, "style /A stick", log=False)
+                run(self.session, f"show {spec}/A target a", log=False)
+                run(self.session, f"style {spec}/A stick", log=False)
             if self.sphere_check_A.isChecked():
-                run(self.session, "show /A target a", log=False)
-                run(self.session, "style /A sphere", log=False)
+                run(self.session, f"show {spec}/A target a", log=False)
+                run(self.session, f"style {spec}/A sphere", log=False)
         except Exception as e:
             self.session.logger.warning(f"Chain A style error: {e}")
 
         try:
             # Chain B
-            run(self.session, "hide /B target ac", log=False)
+            run(self.session, f"hide {spec}/B target ac", log=False)
             if self.cartoon_check_B.isChecked():
-                run(self.session, "cartoon /B", log=False)
-                run(self.session, "show /B target c", log=False)
+                run(self.session, f"cartoon {spec}/B", log=False)
+                run(self.session, f"show {spec}/B target c", log=False)
             if self.stick_check_B.isChecked():
-                run(self.session, "show /B target a", log=False)
-                run(self.session, "style /B stick", log=False)
+                run(self.session, f"show {spec}/B target a", log=False)
+                run(self.session, f"style {spec}/B stick", log=False)
             if self.sphere_check_B.isChecked():
-                run(self.session, "show /B target a", log=False)
-                run(self.session, "style /B sphere", log=False)
+                run(self.session, f"show {spec}/B target a", log=False)
+                run(self.session, f"style {spec}/B sphere", log=False)
         except Exception as e:
             self.session.logger.warning(f"Chain B style error: {e}")
 
     def _apply_coloring(self):
-        """Apply coloring to all structures at once."""
-        if not self.structures:
+        """Apply coloring to tool structures only."""
+        if not self._validate_structures():
             return
 
         from chimerax.core.commands import run
+        spec = self._model_spec()
 
         color_mode = self.color_combo.currentText()
 
         try:
             if color_mode == "By Chain":
-                run(self.session, "color bychain", log=False)
+                run(self.session, f"color bychain {spec}", log=False)
             elif color_mode == "By pLDDT":
-                run(self.session, "color bfactor palette alphafold", log=False)
+                run(self.session, f"color bfactor {spec} palette alphafold", log=False)
             elif color_mode == "By Secondary Structure":
-                run(self.session, "color helix purple", log=False)
-                run(self.session, "color strand yellow", log=False)
-                run(self.session, "color coil gray", log=False)
+                run(self.session, f"color helix {spec} purple", log=False)
+                run(self.session, f"color strand {spec} yellow", log=False)
+                run(self.session, f"color coil {spec} gray", log=False)
             elif color_mode == "Rainbow":
-                run(self.session, "rainbow", log=False)
+                run(self.session, f"rainbow {spec}", log=False)
             elif color_mode == "By Atom":
-                run(self.session, "color byhetero", log=False)
+                run(self.session, f"color byhetero {spec}", log=False)
         except Exception as e:
             self.session.logger.warning(f"Coloring error: {e}")
 
     def _apply_ligand_style(self):
-        """Apply ligand/ion display settings to all structures at once."""
-        if not self.structures:
+        """Apply ligand/ion display settings to tool structures only."""
+        if not self._validate_structures():
             return
 
         from chimerax.core.commands import run
+        lig_spec = f"{self._model_spec()} & ~protein & ~nucleic"
 
         show_stick = self.stick_check_lig.isChecked()
         show_sphere = self.sphere_check_lig.isChecked()
@@ -901,15 +998,15 @@ class AMESViewerTool(ToolInstance):
 
         try:
             if show_any:
-                run(self.session, "show ~protein & ~nucleic target a", log=False)
+                run(self.session, f"show {lig_spec} target a", log=False)
                 if show_ball:
-                    run(self.session, "style ~protein & ~nucleic ball", log=False)
+                    run(self.session, f"style {lig_spec} ball", log=False)
                 elif show_sphere:
-                    run(self.session, "style ~protein & ~nucleic sphere", log=False)
+                    run(self.session, f"style {lig_spec} sphere", log=False)
                 elif show_stick:
-                    run(self.session, "style ~protein & ~nucleic stick", log=False)
+                    run(self.session, f"style {lig_spec} stick", log=False)
             else:
-                run(self.session, "hide ~protein & ~nucleic target a", log=False)
+                run(self.session, f"hide {lig_spec} target a", log=False)
         except Exception as e:
             self.session.logger.warning(f"Ligand style error: {e}")
 
@@ -942,7 +1039,12 @@ class AMESViewerTool(ToolInstance):
 
         try:
             # Start recording
-            run(self.session, "movie record")
+            record_cmd = "movie record"
+            w = self.res_width_spin.value()
+            h = self.res_height_spin.value()
+            if w > 0 and h > 0:
+                record_cmd += f" size {w},{h}"
+            run(self.session, record_cmd)
 
             if self.record_all_mode:
                 # Interactive mode: just start recording, user will stop manually
@@ -970,8 +1072,7 @@ class AMESViewerTool(ToolInstance):
             # Play through frames
             for idx, frame_i in enumerate(frame_indices):
                 if not self.is_recording:
-                    self.movie_status.setText("Recording stopped")
-                    run(self.session, "movie abort")
+                    # Stopped by _stop_recording which already handled abort
                     break
 
                 self._show_frame(frame_i)
@@ -979,22 +1080,23 @@ class AMESViewerTool(ToolInstance):
                 self.movie_status.setText(f"Recording {idx+1}/{n_frames}")
                 self.session.ui.processEvents()
 
-            # Encode if not stopped
+            # Encode if not stopped externally
             if self.is_recording:
                 run(self.session, "movie stop")
                 run(self.session, f'movie encode "{filepath}" framerate {framerate:.1f}')
                 self.movie_status.setText(f"Saved: {os.path.basename(filepath)}")
                 self.session.logger.info(f"Movie saved to {filepath} ({n_frames} frames, {framerate:.1f} fps)")
+                self._finish_recording()
+            # else: _stop_recording already called _finish_recording
 
         except Exception as e:
             self.session.logger.error(f"Movie recording failed: {e}")
             self.movie_status.setText(f"Error: {e}")
             try:
                 run(self.session, "movie abort")
-            except:
+            except Exception:
                 pass
-
-        self._finish_recording()
+            self._finish_recording()
 
     def _finish_recording(self):
         """Reset recording state."""
@@ -1023,35 +1125,36 @@ class AMESViewerTool(ToolInstance):
                 self.movie_status.setText(f"Error: {e}")
                 try:
                     run(self.session, "movie abort")
-                except:
+                except Exception:
                     pass
         else:
             # Frame-by-frame mode or no recording in progress - just abort
             try:
                 run(self.session, "movie abort")
                 self.movie_status.setText("Recording stopped")
-            except:
+            except Exception:
                 pass
 
         self._finish_recording()
 
     def _close_structures(self):
-        """Close all structures in our list."""
+        """Close all structures in our list with a single command."""
         if not self.structures:
             return
-        
+
         from chimerax.core.commands import run
-        
-        for model in self.structures:
-            try:
-                run(self.session, f"close #{model.id_string}")
-            except:
-                pass
-        
+
+        spec = self._model_spec()
+        try:
+            run(self.session, f"close {spec}")
+        except Exception:
+            pass
+
         self.structures = []
 
     def delete(self):
         """Clean up when tool is closed."""
         self._stop_playback()
+        self._close_structures()
         self._cleanup_tmp()
         super().delete()
